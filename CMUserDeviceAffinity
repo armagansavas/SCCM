@@ -1,0 +1,20 @@
+#Connect SCCM Powershell Module
+$PathToSCCMModule = "D:\ConfigMgr\AdminConsole\bin\ConfigurationManager\ConfigurationManager.psd1"
+Import-Module $PathToSCCMModule -ErrorAction SilentlyContinue
+$SiteCode = "ARM:"
+Set-Location $SiteCode
+
+$UserList = get-content "D:\List.txt"
+$UserAffinity = @()
+foreach($User in $UserList){
+    $Computer = Get-CMUserDeviceAffinity -UserName $User
+    $obj = [PSCustomObject]@{
+         Username = $User
+         PrimaryDevice =  $Computer.ResourceName
+        }
+        
+    $UserAffinity += $obj
+
+ 
+}
+$UserAffinity
