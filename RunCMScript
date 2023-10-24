@@ -1,0 +1,80 @@
+# Function: Connect to SCCM Site
+Function Connect-CMSite {
+    [CmdletBinding()]
+    param(
+        [parameter(Mandatory=$true)]
+        $SiteCode,      # Specify the SCCM Site Code
+
+        [parameter(Mandatory=$true)]
+        $SiteServer     # Specify the SCCM Site Server
+    )
+
+    Import-Module $env:SMS_ADMIN_UI_PATH.Replace("\bin\i386", "\bin\ConfigurationManager.psd1")
+    $CMDrive = Get-PSDrive -Name $SiteCode -ErrorAction Ignore
+
+    # Connect to the Drive
+    if ($CMDrive) {
+        Write-Host "PSDrive: $SiteCode already exists, changing the current drive"
+        Set-Location $SiteCode":"
+    } else {
+        Write-Host "PSDrive: $SiteCode does not exist, adding..."
+        $i = 1
+
+        Do {
+            Write-Host "Loop $i"
+            $NewDrive = New-PSDrive -Name $SiteCode -PSProvider "CMSite" -Root $SiteServer -Scope Global
+            $i++
+        } Until ($NewDrive -ne $null -or $i -gt 10)
+
+        Set-Location $SiteCode":"
+    }
+}
+
+# Function: Logging
+Function Write-Log {
+    Param ([string]$LogString)
+    $Logfile = "C:\Logs\CM_Scripts.log"
+    $Stamp = (Get-Date).toString("yyyy/MM/dd HH:mm:ss")
+    $LogMessage = "$Stamp $LogString"
+    Add-content $LogFile -value $LogMessage
+}
+
+# Connect to SCCM Site
+Connect-CMSite -SiteCode 'SiteCode' -SiteServer 'SiteServer'
+
+# Variables
+$ScriptName = "___ScriptName"
+$CollectionName = "___CollectionName"
+$SiteCode = "_SiteCode"
+#
+
+
+# Main Code
+$ScriptGuid = (Get-CMScript -ScriptName $ScriptName -Fast).ScriptGuid
+
+If (!($ScriptGuid)){
+    Write-Log -LogString "Could not find a Run Script named $ScriptName, aborting..."
+    Break
+}
+
+$CMCollectionID = (Get-CMCollection -Name $CollectionName).CollectionID
+$OperationID = (Invoke-CMScript -ScriptGuid $ScriptGuid -CollectionId $CMCollectionID -PassThru).OperationID
+Write-Log -LogString "$($CollectionName) ($($ScriptName)) script initiated."
+
+$NumberOfLoops = 30
+$LoopInterval = 10 # Seconds
+$i = 1
+
+do {
+    $Operation = Get-CimInstance -Namespace root\SMS\Site_$SiteCode -ClassName SMS_ScriptsExecutionStatus -Filter "ClientOperationID = '$OperationID'" 
+    If ($Operation){
+        # Got the status, time to exit the loop
+        Break
+    }
+
+    Start-Sleep -Seconds $LoopInterval
+    $i++
+} while ($i -le $NumberOfLoops)
+
+
+Write-Log -LogString "$($Operation.DeviceName) ($($Operation.ScriptOutput)) Script completed on servers"
